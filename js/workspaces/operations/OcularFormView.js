@@ -1,5 +1,6 @@
 import { saveOcularDraft, getOcularDraft } from '../../shared/formStorage.js';
 import { getActiveProfileId } from '../../components/ActiveProfilePicker.js';
+import { isJobVisibleToActiveUser } from '../../services/dataService.js';
 import { initSignaturePad } from '../../shared/signaturePad.js';
 import { getItemsByCategory } from '../../services/masterDataService.js';
 import { navigateTo } from '../../components/Router.js';
@@ -26,10 +27,16 @@ export default class OcularFormView {
         
         await this.loadCatalogs();
         
-        // Try to load draft
-        const draftId = sessionStorage.getItem('currentOcularDraftId');
+        // Try to load a job: ?id=N in the URL, else the draft picked from a list
+        const urlId = new URLSearchParams(location.search).get('id');
+        const draftId = urlId || sessionStorage.getItem('currentOcularDraftId');
         if (draftId) {
-            const draft = await getOcularDraft(parseInt(draftId));
+            const draft = await getOcularDraft(parseInt(draftId, 10));
+            if (draft && !isJobVisibleToActiveUser(draft)) {
+                sessionStorage.removeItem('currentOcularDraftId');
+                this.container.innerHTML = `<h2>Inspection</h2><p class="not-assigned-msg">This job isn't assigned to you.</p>`;
+                return this.container;
+            }
             if (draft) this.formData = draft;
         }
         this.normalizePhotoAttachments();

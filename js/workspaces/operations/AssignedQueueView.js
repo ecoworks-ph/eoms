@@ -15,7 +15,7 @@ export default class AssignedQueueView {
         const listDiv = container.querySelector('#assigned-list');
         
         try {
-            // For demo, we just fetch all assigned if no strict team check is enforced
+            // Scoped to the signed-in Operations user's own jobs (see dataService)
             const items = await fetchAllAssignedInspections();
             items.sort((a, b) => b.id - a.id);
             

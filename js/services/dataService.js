@@ -2,40 +2,74 @@ import * as db from './localDb.js';
 import { recordAudit, diffFields, diffChecklist, leadLabel } from './auditLogService.js';
 import { getCatalog } from './masterDataService.js';
 
+import { getActiveProfile, getActiveProfileId } from '../components/ActiveProfilePicker.js';
+
 const { COLLECTIONS, get, getAll, put, remove, getByIndex, getAllByIndex, dbEvents } = db;
+
+// -- Operations job scoping --
+// An Operations user only sees jobs dispatched to them (assignedTeam = their profile id)
+// or jobs they created themselves (New Inspection). Every other role sees everything.
+
+function sameId(a, b) {
+  return a !== null && a !== undefined && a !== '' && b !== null && b !== undefined && Number(a) === Number(b);
+}
+
+/** The profile id to scope to when the active user is Operations; null for every other role. */
+export function operationsScopeId() {
+  const p = getActiveProfile();
+  if (!p || p.role !== 'operations') return null;
+  const id = p.id ?? getActiveProfileId();
+  return id === null || id === undefined ? -1 : Number(id);
+}
+
+/** True when the active user may open this job (always true for non-Operations roles). */
+export function isJobVisibleToActiveUser(record) {
+  const me = operationsScopeId();
+  if (me === null) return true;
+  return !!record && (sameId(record.assignedTeam, me) || sameId(record.createdBy, me));
+}
+
+function scopeToActiveUser(items) {
+  if (operationsScopeId() === null) return items;
+  return (items || []).filter(isJobVisibleToActiveUser);
+}
 
 // -- Ocular Inspections --
 
 export async function fetchReadyInspections(teamId = null) {
-  return getAll(COLLECTIONS.OCULAR_INSPECTIONS, (item) => {
+  const items = await getAll(COLLECTIONS.OCULAR_INSPECTIONS, (item) => {
     let match = item.status === 'READY_FOR_INSTALLATION' && !item.deletedAt;
     if (teamId) {
-      match = match && item.assignedTeam === teamId;
+      match = match && sameId(item.assignedTeam, teamId);
     }
     return match;
   });
+  return scopeToActiveUser(items);
 }
 
 export async function fetchPendingInstallations(teamId = null) {
-  return getAll(COLLECTIONS.INSTALLATION_RECORDS, (item) => {
+  const items = await getAll(COLLECTIONS.INSTALLATION_RECORDS, (item) => {
     let match = item.status === 'ASSIGNED_PENDING_INSTALLATION' && !item.deletedAt;
     if (teamId) {
-      match = match && item.assignedTeam === teamId;
+      match = match && sameId(item.assignedTeam, teamId);
     }
     return match;
   });
+  return scopeToActiveUser(items);
 }
 
 export async function fetchAssignedInspections(teamId) {
-  return getAll(COLLECTIONS.OCULAR_INSPECTIONS, (item) => 
-    item.status === 'ASSIGNED_PENDING_INSPECTION' && item.assignedTeam === teamId && !item.deletedAt
+  const items = await getAll(COLLECTIONS.OCULAR_INSPECTIONS, (item) =>
+    item.status === 'ASSIGNED_PENDING_INSPECTION' && sameId(item.assignedTeam, teamId) && !item.deletedAt
   );
+  return scopeToActiveUser(items);
 }
 
 export async function fetchAllAssignedInspections() {
-  return getAll(COLLECTIONS.OCULAR_INSPECTIONS, (item) => 
+  const items = await getAll(COLLECTIONS.OCULAR_INSPECTIONS, (item) =>
     item.status === 'ASSIGNED_PENDING_INSPECTION' && !item.deletedAt
   );
+  return scopeToActiveUser(items);
 }
 
 export async function fetchPendingQAInspections() {
@@ -43,7 +77,8 @@ export async function fetchPendingQAInspections() {
 }
 
 export async function fetchMySubmittedInspections(profileId) {
-  return getAllByIndex(COLLECTIONS.OCULAR_INSPECTIONS, 'createdBy', profileId);
+  const items = await getAllByIndex(COLLECTIONS.OCULAR_INSPECTIONS, 'createdBy', profileId);
+  return scopeToActiveUser(items);
 }
 
 export async function updateInspectionStatus(id, newStatus, extra = {}) {

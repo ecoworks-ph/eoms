@@ -1,4 +1,5 @@
 import { liveRefresh } from '../../services/realtime.js';
+import { fetchPendingInstallations } from '../../services/dataService.js';
 import { buildInspectionSummaryHtml } from '../../shared/inspectionSummary.js';
 import { escapeHTML } from '../../shared/security.js';
 import { btnContent } from '../../shared/icons.js';
@@ -14,8 +15,9 @@ export default class ReadyQueueView {
         const previewDiv = container.querySelector('#preview-container');
         
         try {
-            const { getAll, COLLECTIONS, get } = await import('../../services/localDb.js');
-            const items = await getAll(COLLECTIONS.INSTALLATION_RECORDS, i => i.status === 'ASSIGNED_PENDING_INSTALLATION' && !i.deletedAt);
+            const { COLLECTIONS, get } = await import('../../services/localDb.js');
+            // Scoped to the signed-in Operations user's own jobs
+            const items = await fetchPendingInstallations();
             
             if (items.length === 0) {
                 listDiv.innerHTML = `<p>No pending installations.</p>`;
