@@ -6,6 +6,11 @@ import { formatStatus } from '../../shared/statusFormatter.js';
 import { btnContent } from '../../shared/icons.js';
 
 export default class SupportTicketsHubView {
+    /** @param {{readOnly?: boolean}} [options] readOnly hides the Resolve action. */
+    constructor({ readOnly = false } = {}) {
+        this.readOnly = readOnly;
+    }
+
     async render() {
         const container = document.createElement('div');
         container.className = 'card';
@@ -46,7 +51,7 @@ export default class SupportTicketsHubView {
                                 <td>${escapeHTML(t.priority)}</td>
                                 <td>${escapeHTML(formatStatus(t.status))}</td>
                                 <td>
-                                    ${t.status === 'OPEN' ? `<button class="resolve-btn btn-sm" data-id="${t.id}" title="Resolve" aria-label="Resolve">${btnContent('check', 'Resolve')}</button>` : 'Resolved'}
+                                    ${t.status === 'OPEN' ? (this.readOnly ? '' : `<button class="resolve-btn btn-sm" data-id="${t.id}" title="Resolve" aria-label="Resolve">${btnContent('check', 'Resolve')}</button>`) : 'Resolved'}
                                 </td>
                             </tr>
                         `).join('')}
@@ -54,6 +59,7 @@ export default class SupportTicketsHubView {
                 </table>
             `;
 
+            if (this.readOnly) return;
             container.querySelectorAll('.resolve-btn').forEach(btn => {
                 btn.addEventListener('click', async (e) => {
                     const id = parseInt(e.target.dataset.id, 10);

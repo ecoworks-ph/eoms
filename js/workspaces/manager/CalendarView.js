@@ -4,7 +4,9 @@ import { formatStatus } from '../../shared/statusFormatter.js';
 import { btnContent } from '../../shared/icons.js';
 
 export default class CalendarView {
-    constructor() {
+    /** @param {{readOnly?: boolean}} [options] The calendar has no edit actions today; the flag is kept for parity. */
+    constructor({ readOnly = false } = {}) {
+        this.readOnly = readOnly;
         const today = new Date();
         this.currentMonth = today.getMonth();
         this.currentYear = today.getFullYear();

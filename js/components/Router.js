@@ -4,6 +4,7 @@ import { getActiveProfile, roleHome, isPathAllowed } from './ActiveProfilePicker
 const routes = [
     { prefix: '/admin', importFn: () => import('../workspaces/AdminWorkspace.js') },
     { prefix: '/manager', importFn: () => import('../workspaces/ManagerWorkspace.js') },
+    { prefix: '/engineering', importFn: () => import('../workspaces/EngineeringWorkspace.js') },
     { prefix: '/ocular', importFn: () => import('../workspaces/OperationsWorkspace.js') }
 ];
 

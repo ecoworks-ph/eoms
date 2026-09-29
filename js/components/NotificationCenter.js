@@ -1,5 +1,5 @@
 import { getAll, put, COLLECTIONS, dbEvents } from '../services/localDb.js';
-import { getActiveProfileId, profileEvents } from './ActiveProfilePicker.js';
+import { getActiveProfileId, getActiveProfile, profileEvents, isPathAllowed } from './ActiveProfilePicker.js';
 import { escapeHTML } from '../shared/security.js';
 import { supabase } from '../services/supabaseClient.js';
 import { icon } from '../shared/icons.js';
@@ -10,6 +10,24 @@ let notifChannelProfileId = null;
 let docClickBound = false;
 let wiredContainerId = null;
 let currentRender = null;
+
+// Stored notification links point at /manager/*. Engineering can't open those,
+// so map them to the matching /engineering page (or null = don't navigate).
+const ENGINEERING_LINK_MAP = {
+    '/manager/pendingvisits': '/engineering/inspections',
+    '/manager/installations': '/engineering/installations',
+    '/manager/calendar': '/engineering/calendar',
+    '/manager/tickets': '/engineering/tickets'
+};
+
+function resolveNotifLink(link) {
+    if (!link) return null;
+    const role = getActiveProfile()?.role;
+    if (role !== 'lead_engineer') return link;
+    if (ENGINEERING_LINK_MAP[link]) return ENGINEERING_LINK_MAP[link];
+    // Any other /manager link would just bounce to the engineering home; don't navigate.
+    return isPathAllowed(role, link) ? link : null;
+}
 
 function subscribeNotifications(profileId, onChange) {
     if (notifChannelProfileId === profileId && notifChannel) return;
@@ -98,8 +116,9 @@ export async function renderNotificationCenter(containerId) {
                 }
                 
                 // If there's a link, navigate
-                if (notif && notif.link) {
-                    window.history.pushState(null, '', notif.link);
+                const target = notif ? resolveNotifLink(notif.link) : null;
+                if (target) {
+                    window.history.pushState(null, '', target);
                     window.dispatchEvent(new PopStateEvent('popstate'));
                     dropdown.style.display = 'none';
                 }

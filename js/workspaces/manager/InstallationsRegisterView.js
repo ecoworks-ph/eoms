@@ -5,13 +5,27 @@ import { formatStatus } from '../../shared/statusFormatter.js';
 import { printInstallationRegister } from '../../shared/certificates.js';
 import { btnContent } from '../../shared/icons.js';
 
+// Installation statuses that count as done (or no longer pending).
+const FINISHED_INSTALL_STATUSES = new Set(['COMMISSIONED', 'INSTALLATION_COMPLETE', 'JOB_CHECKOUT_COMPLETE', 'CANCELED']);
+
 export default class InstallationsRegisterView {
+    /**
+     * @param {{readOnly?: boolean, pendingOnly?: boolean, title?: string}} [options]
+     * pendingOnly lists only installations not yet completed. readOnly is accepted
+     * for parity (the register's only action is Print, which stays).
+     */
+    constructor({ readOnly = false, pendingOnly = false, title = 'Installations' } = {}) {
+        this.readOnly = readOnly;
+        this.pendingOnly = pendingOnly;
+        this.title = title;
+    }
+
     async render() {
         const container = document.createElement('div');
         container.className = 'card';
         
         container.innerHTML = `
-            <h2>Installations</h2>
+            <h2>${escapeHTML(this.title)}</h2>
             <div id="installations-table-container" style="margin-top: 1rem;">
                 <div class="skeleton skeleton-table-row"></div>
                 <div class="skeleton skeleton-table-row"></div>
@@ -28,9 +42,12 @@ export default class InstallationsRegisterView {
 
     async loadInstallations(container) {
         try {
-            const installations = await fetchAllInstallations();
+            let installations = await fetchAllInstallations();
+            if (this.pendingOnly) {
+                installations = installations.filter(i => !i.deletedAt && !FINISHED_INSTALL_STATUSES.has(i.status));
+            }
             if (installations.length === 0) {
-                container.innerHTML = '<p>No installations found.</p>';
+                container.innerHTML = this.pendingOnly ? '<p>No pending installations.</p>' : '<p>No installations found.</p>';
                 return;
             }
             container.innerHTML = `
