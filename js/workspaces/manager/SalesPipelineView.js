@@ -45,7 +45,7 @@ async function buildCrewSelectHtml(selectId) {
     let crew = [];
     try {
         const profiles = await getProfiles();
-        crew = profiles.filter(p => p.role === 'operations' && (!p.status || p.status === 'ACTIVE'));
+        crew = profiles.filter(p => p.role === 'operations' && (!p.status || p.status === 'ACTIVE') && !p.deletedAt);
         crew.sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || '')));
     } catch (e) {
         console.error('Failed to load crew list:', e);

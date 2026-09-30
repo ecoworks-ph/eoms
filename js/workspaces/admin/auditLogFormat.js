@@ -19,6 +19,8 @@ const EVENT_LABELS = {
     UPDATE_STATUS: 'Status changed',
     UPDATE_USER: 'User updated',
     CREATE_USER: 'User added',
+    REMOVE_USER: 'User removed',
+    RESTORE_USER: 'User restored',
     UPDATE_ITEM: 'Item updated',
     LOGIN: 'Signed in',
     LOGOUT: 'Signed out',
@@ -76,7 +78,7 @@ const FIELD_LABELS = {
     remarks: 'Remarks', followUp1: 'Follow-up 1', followUp2: 'Follow-up 2', stage: 'Stage', status: 'Status',
     qaNotes: 'Review Notes', fullName: 'Name', role: 'Role', department: 'Department', itemName: 'Item Name',
     category: 'Category', currentStock: 'Current Stock', unitPrice: 'Unit Price', scheduledDate: 'Scheduled Date',
-    assignedTeam: 'Assigned Crew'
+    assignedTeam: 'Assigned Crew', deletedAt: 'Removed On'
 };
 export function fieldLabel(key) {
     if (FIELD_LABELS[key]) return FIELD_LABELS[key];

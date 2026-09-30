@@ -44,7 +44,7 @@ export async function loadProfileForUser(user) {
     try {
         ({ data, error } = await supabase
             .from('profiles')
-            .select('id,email,full_name,role,status')
+            .select('id,email,full_name,role,status,data')
             .eq('auth_user_id', user.id)
             .maybeSingle());
     } catch (err) {
@@ -65,7 +65,9 @@ export async function loadProfileForUser(user) {
     }
     if (data.status === 'SUSPENDED') {
         await signOutEverywhereLocal();
-        return { error: 'Your account is suspended.' };
+        return { error: data.data && data.data.deletedAt
+            ? 'Your account has been removed. Contact the admin.'
+            : 'Your account is suspended.' };
     }
     return { profile: data };
 }
