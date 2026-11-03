@@ -1,5 +1,6 @@
 import { liveRefresh } from '../../services/realtime.js';
-import { fetchAllSalesLeads, createSalesLead, updateSalesLeadStage, bulkImportSalesLeads, archiveSalesLead, dispatchOcularFromLead, CHECKLIST_STAGES } from '../../services/dataService.js';
+import { fetchAllSalesLeads, createSalesLead, updateSalesLeadStage, bulkImportSalesLeads, archiveSalesLead, restoreSalesLead, fetchAllSalesLeadsIncludingArchived, dispatchOcularFromLead, CHECKLIST_STAGES } from '../../services/dataService.js';
+import { findExistingClients } from '../../shared/existingClients.js';
 import { getActiveProfileId } from '../../components/ActiveProfilePicker.js';
 import { escapeHTML } from '../../shared/security.js';
 import { formatStatus } from '../../shared/statusFormatter.js';
@@ -99,8 +100,14 @@ function detailItem(label, val) {
     return `<div class="lead-detail"><div class="lead-detail__k">${label}</div><div class="lead-detail__v">${val || '—'}</div></div>`;
 }
 
+/** Units linked through parentLeadId: the parent, its other children, or this lead's own children (links only, no matching). */
+function relatedUnits(lead, all) {
+    const root = lead.parentLeadId || lead.id;
+    return (all || []).filter(o => o.id !== lead.id && (o.id === lead.parentLeadId || o.parentLeadId === root));
+}
+
 /** Read-only Details modal body: same fields as the old inline details row. */
-function detailsModalHtml(l) {
+function detailsModalHtml(l, related = []) {
     const created = l.createdAt ? new Date(l.createdAt).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric' }) : '';
     return `
         <div class="lead-details__grid">
@@ -116,6 +123,7 @@ function detailsModalHtml(l) {
             ${l.stage === 'CANCELED' && l.cancelNote ? detailItem('Cancellation Note', escapeHTML(l.cancelNote)) : ''}
             ${detailItem('Created', escapeHTML(created))}
         </div>
+        ${related.length ? `<div class="lead-details__section"><div class="lead-detail__k">Other units for this client</div><ul>${related.map(r => `<li>${escapeHTML(r.clientId || '—')} · ${escapeHTML(formatStatus(r.stage))}</li>`).join('')}</ul></div>` : ''}
         <div class="lead-details__section"><div class="lead-detail__k">Progress</div>${timelineHtml(l)}</div>
         <div class="lead-details__grid">
             ${detailItem('Remarks', linkify(l.remarks) && `<div class="lead-remarks">${linkify(l.remarks)}</div>`)}
@@ -279,6 +287,8 @@ export default class SalesPipelineView {
                         ${field('add-lead-address', 'Location Address *', (id, errId) => `<textarea id="${id}" name="installationAddress" required rows="2" aria-describedby="${errId}"></textarea>`)}
                     </div>
                     <div class="add-client-footer">
+                        <p id="add-lead-unit-note" class="existing-client-meta" role="status" hidden></p>
+                        <div id="add-lead-existing"></div>
                         <p class="field-error" id="add-lead-form-error" role="alert"></p>
                         <div class="modal-actions" style="margin: 0;">
                             <button type="button" id="add-lead-cancel-btn" style="background: #e2e8f0; color: #333;">${btnContent('x', 'Cancel')}</button>
@@ -292,7 +302,7 @@ export default class SalesPipelineView {
         const dialog = modal.querySelector('[role="dialog"]');
         const form = modal.querySelector('#add-lead-form');
         const submitBtn = modal.querySelector('#add-lead-submit-btn');
-        const submitIdleHtml = submitBtn.innerHTML;
+        let submitIdleHtml = submitBtn.innerHTML;
         const submitBusyHtml = btnContent('save', 'Saving…');
         const prevOverflow = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
@@ -342,9 +352,91 @@ export default class SalesPipelineView {
         };
         const labelFor = (el) => (el.closest('.form-group')?.querySelector('label')?.textContent || 'This field').replace(/\s*\*\s*$/, '');
 
+        // Existing client check: compares phone, email and client ID with every lead (archived too). Leads are fetched once per open.
+        const existingEl = form.querySelector('#add-lead-existing');
+        const WHY_LABEL = { phone: 'phone', email: 'email', clientId: 'client ID' };
+        let checkLeads = [];
+        let hardStop = false;
+        let parentLead = null; // set by "Add another unit for this client"; saved as parentLeadId on the new record
+        const unitNote = form.querySelector('#add-lead-unit-note');
+        const startAnotherUnit = (lead) => {
+            const setVal = (name, v) => { const el = form.elements[name]; if (el && v != null) el.value = v; };
+            setVal('clientName', leadName(lead));
+            setVal('phone', lead.phone || (String(lead.contactInfo || '').includes('@') ? '' : lead.contactInfo) || '');
+            setVal('email', lead.email || '');
+            setVal('installationAddress', lead.installationAddress || '');
+            setVal('buildingType', lead.buildingType || '');
+            setVal('clientId', '');
+            setVal('rnNo', '');
+            parentLead = lead;
+            unitNote.textContent = `Adding another unit for ${leadName(lead)}. Enter this unit's own Client ID.`;
+            unitNote.hidden = false;
+            clearFieldErrors();
+            clearTimeout(checkTimer);
+            renderExisting();
+            form.elements.clientId.focus();
+        };
+        const addedOn = (l) => l.createdAt ? new Date(l.createdAt).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric' }) : '';
+        const setSubmitHtml = (html) => { submitIdleHtml = html; if (!submitBtn.hasAttribute('aria-busy')) submitBtn.innerHTML = html; };
+        const renderExisting = () => {
+            const matches = findExistingClients({
+                phone: form.elements.phone.value,
+                email: form.elements.email.value,
+                clientId: form.elements.clientId.value
+            }, checkLeads);
+            hardStop = matches.some(m => m.why.includes('clientId'));
+            submitBtn.disabled = hardStop;
+            setSubmitHtml(matches.length && !hardStop ? btnContent('plus', 'Add as a new client anyway') : btnContent('plus', 'Add Client'));
+            if (!matches.length) { existingEl.innerHTML = ''; return; }
+            const heading = hardStop ? 'This client already exists' : (matches.length > 1 ? 'These may be existing clients' : 'This may be an existing client');
+            existingEl.innerHTML = `
+                <div class="existing-client-panel existing-client-panel--${hardStop ? 'hard' : 'soft'}" role="status">
+                    <h4>${escapeHTML(heading)}</h4>
+                    ${matches.map((m, i) => `
+                        <div class="existing-client-match">
+                            <strong>${escapeHTML(leadName(m.lead))}</strong>
+                            <div class="existing-client-meta">${escapeHTML([m.lead.phone || m.lead.contactInfo, m.lead.clientId, formatStatus(m.lead.stage), addedOn(m.lead) && `Added ${addedOn(m.lead)}`].filter(Boolean).join(' · '))}</div>
+                            <div>
+                                ${m.why.map(w => `<span class="existing-client-tag existing-client-tag--why">${escapeHTML(`Matched on ${WHY_LABEL[w]}`)}</span>`).join('')}
+                                ${m.lead.deletedAt ? '<span class="existing-client-tag existing-client-tag--gone">Archived</span>' : ''}
+                            </div>
+                            <div class="existing-client-actions">
+                                <button type="button" class="btn-sm" data-open="${i}">Open existing client</button>
+                                <button type="button" class="btn-sm" data-unit="${i}">Add another unit for this client</button>
+                                ${m.lead.deletedAt ? `<button type="button" class="btn-sm" data-restore="${i}">Restore this client</button>` : ''}
+                            </div>
+                        </div>`).join('')}
+                    ${hardStop ? '<p class="existing-client-meta">The client ID is unique, so a second record cannot be created. Open the existing client instead.</p>' : ''}
+                </div>`;
+            existingEl.querySelectorAll('[data-open]').forEach(btn => btn.addEventListener('click', () => {
+                const lead = matches[Number(btn.dataset.open)].lead;
+                closeModal();
+                this.openDetailsModal(lead.id, container, triggerBtn, lead);
+            }));
+            existingEl.querySelectorAll('[data-unit]').forEach(btn => btn.addEventListener('click', () => startAnotherUnit(matches[Number(btn.dataset.unit)].lead)));
+            existingEl.querySelectorAll('[data-restore]').forEach(btn => btn.addEventListener('click', async () => {
+                const lead = matches[Number(btn.dataset.restore)].lead;
+                btn.disabled = true;
+                try {
+                    await restoreSalesLead(lead.id);
+                    checkLeads = await fetchAllSalesLeadsIncludingArchived();
+                    renderExisting();
+                    this.refreshLeads(container);
+                } catch (err) {
+                    btn.disabled = false;
+                    formErrEl.textContent = 'Error restoring client: ' + (err && err.message ? err.message : err);
+                }
+            }));
+        };
+        let checkTimer = null;
+        const scheduleCheck = () => { clearTimeout(checkTimer); checkTimer = setTimeout(renderExisting, 300); };
+        ['phone', 'email', 'clientId'].forEach(n => form.elements[n].addEventListener('input', scheduleCheck));
+        fetchAllSalesLeadsIncludingArchived().then(leads => { checkLeads = leads; renderExisting(); }).catch(() => { /* check is advisory; the service still blocks duplicate client IDs */ });
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             clearFieldErrors();
+            if (hardStop) return;
             // novalidate: run the browser checks ourselves so the first invalid field gets focus and an inline message.
             const invalid = Array.from(form.elements).find(el => el.willValidate && !el.checkValidity());
             if (invalid) {
@@ -378,6 +470,7 @@ export default class SalesPipelineView {
                 followUp2: '',
                 createdBy: getActiveProfileId()
             };
+            if (parentLead) lead.parentLeadId = parentLead.id;
             submitBtn.disabled = true;
             submitBtn.setAttribute('aria-busy', 'true');
             submitBtn.innerHTML = submitBusyHtml;
@@ -479,8 +572,8 @@ export default class SalesPipelineView {
     }
 
     /** Read-only Details popup: client info, progress timeline and remarks. Edit hands off to the CRM Profile modal. */
-    openDetailsModal(id, container, triggerBtn) {
-        const lead = (this.allLeads || []).find(l => l.id === id);
+    openDetailsModal(id, container, triggerBtn, leadOverride) {
+        const lead = leadOverride || (this.allLeads || []).find(l => l.id === id);
         if (!lead) return;
 
         const titleId = `lead-details-title-${id}`;
@@ -498,7 +591,7 @@ export default class SalesPipelineView {
                     <h3 id="${titleId}">${escapeHTML(lead.clientId || '')}${lead.clientId ? ' — ' : ''}${escapeHTML(leadName(lead))}</h3>
                     <span style="background: #e2e8f0; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">${escapeHTML(formatStatus(lead.stage))}</span>
                 </div>
-                ${detailsModalHtml(lead)}
+                ${detailsModalHtml(lead, relatedUnits(lead, this.allLeads))}
                 <div class="modal-actions">
                     <button type="button" id="lead-details-edit-btn" class="btn-sm" style="background-color: #6366f1; color: white;">${btnContent('pencil', 'Edit')}</button>
                     <button type="button" id="lead-details-close-btn" class="btn-sm" style="background: #e2e8f0; color: #333;">${btnContent('x', 'Close')}</button>

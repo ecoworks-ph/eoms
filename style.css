@@ -968,6 +968,28 @@ li.is-done > .lead-timeline__tick { background: var(--brand-green, #16a34a); bor
 }
 #add-client-dialog .add-client-footer .field-error:not(:empty) { margin-bottom: 0.6rem; }
 #add-client-dialog .modal-actions button { height: 44px; }
+/* Existing client check panel (sits above the footer buttons; scrolls if there are several matches) */
+#add-client-dialog .existing-client-panel {
+  max-height: 40vh; overflow-y: auto; margin-bottom: 0.7rem; padding: 0.7rem 0.8rem;
+  border: 1px solid #d97706; border-radius: 8px; background: #fef3c7; color: #78350f;
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+#add-client-dialog .existing-client-panel--hard { border-color: #b91c1c; background: #fee2e2; color: #7f1d1d; }
+#add-client-dialog .existing-client-panel h4 { margin: 0; font-size: 0.9rem; }
+#add-client-dialog .existing-client-match {
+  background: white; color: #1e293b; border: 1px solid #e2e8f0; border-radius: 6px;
+  padding: 0.55rem 0.65rem; display: flex; flex-direction: column; gap: 0.35rem;
+}
+#add-client-dialog .existing-client-meta { margin: 0; font-size: 0.8rem; color: #64748b; overflow-wrap: anywhere; }
+#add-client-dialog .existing-client-tag {
+  display: inline-block; margin-right: 0.3rem; padding: 0.05rem 0.5rem; border-radius: 99px;
+  font-size: 0.75rem; font-weight: 600; background: #e2e8f0; color: #475569;
+}
+#add-client-dialog .existing-client-tag--why { background: #dbeafe; color: #1d4ed8; }
+#add-client-dialog .existing-client-tag--gone { background: #fee2e2; color: #b91c1c; }
+#add-client-dialog .existing-client-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+#add-client-dialog .existing-client-actions button:focus-visible { outline: 2px solid #1569a3; outline-offset: 2px; }
+#add-client-dialog #add-lead-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 @media screen and (max-width: 640px) {
   #add-client-dialog {
     width: 100% !important; max-width: 100% !important; height: 100%; max-height: 100% !important;

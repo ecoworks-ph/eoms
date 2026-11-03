@@ -3,6 +3,7 @@ import { recordAudit, diffFields, diffChecklist, leadLabel } from './auditLogSer
 import { getCatalog } from './masterDataService.js';
 import { CANCEL_REASON_OTHER, isValidCancelReason, cancelReasonLabel } from '../shared/cancelReasons.js';
 
+import { findExistingClients } from '../shared/existingClients.js';
 import { getActiveProfile, getActiveProfileId } from '../components/ActiveProfilePicker.js';
 
 const { COLLECTIONS, get, getAll, put, remove, getByIndex, getAllByIndex, dbEvents } = db;
@@ -262,18 +263,33 @@ export async function fetchAllSalesLeads() {
   return getAll(COLLECTIONS.SALES_LEADS, item => !item.deletedAt);
 }
 
-export async function createSalesLead(leadData) {
+/** Every lead including archived ones (deletedAt set), for the duplicate check. */
+export async function fetchAllSalesLeadsIncludingArchived() {
+  return getAll(COLLECTIONS.SALES_LEADS);
+}
+
+/** `skipClientIdCheck` is for the internal inspection sync, which must never throw on an archived lead with the same Client ID. */
+export async function createSalesLead(leadData, { skipClientIdCheck = false } = {}) {
+  const clientId = String(leadData.clientId || '').trim();
+  if (clientId && !skipClientIdCheck) {
+    const existing = findExistingClients({ clientId }, await fetchAllSalesLeadsIncludingArchived()).find(m => m.why.includes('clientId'));
+    if (existing) {
+      throw new Error(`Client ID ${clientId} already exists (${leadLabel(existing.lead)})${existing.lead.deletedAt ? ' as an archived client' : ''}.`);
+    }
+  }
   leadData.stage = 'INITIAL_CONTACT';
   leadData.stageINITIAL_CONTACTAt = new Date().toISOString();
   markChecklistDone(leadData, 'INITIAL_CONTACT');
   const saved = await put(COLLECTIONS.SALES_LEADS, leadData);
+  const parent = saved.parentLeadId ? await get(COLLECTIONS.SALES_LEADS, saved.parentLeadId) : null;
   await recordAudit({
     category: 'CLIENT_RECORDS',
     eventType: 'CREATE_LEAD',
     resourceType: 'LEAD',
     resourceId: saved.id,
     resourceLabel: leadLabel(saved),
-    description: `Client added: ${leadLabel(saved)}`
+    description: `Client added: ${leadLabel(saved)}${saved.parentLeadId ? ` (another unit for ${parent ? leadLabel(parent) : 'lead #' + saved.parentLeadId})` : ''}`,
+    changesDelta: saved.parentLeadId ? diffFields({}, saved, ['parentLeadId']) : undefined
   }, { always: true });
   return saved;
 }
@@ -407,6 +423,7 @@ export async function ensureLeadForInspection(inspectionId, newStage) {
       const name = String(insp.clientName || '').trim();
       const i = name.lastIndexOf(' ');
       const contact = insp.contactNo || '';
+      // Internal path: never blocked by the Add Client uniqueness rule (an archived lead with this Client ID is not restored or linked).
       await createSalesLead({
         clientId,
         rnNo,
@@ -423,7 +440,7 @@ export async function ensureLeadForInspection(inspectionId, newStage) {
         followUp2: '',
         ocularId: inspectionId,
         createdBy: getActiveProfileId()
-      });
+      }, { skipClientIdCheck: true });
     }
   }
   const saved = await updateLeadStageByOcularId(inspectionId, newStage);
@@ -437,6 +454,22 @@ export async function archiveSalesLead(id) {
     record.deletedAt = new Date().toISOString();
     return put(COLLECTIONS.SALES_LEADS, record);
   }
+}
+
+export async function restoreSalesLead(id) {
+  const record = await get(COLLECTIONS.SALES_LEADS, id);
+  if (!record) return;
+  delete record.deletedAt;
+  const saved = await put(COLLECTIONS.SALES_LEADS, record);
+  await recordAudit({
+    category: 'CLIENT_RECORDS',
+    eventType: 'RESTORE_LEAD',
+    resourceType: 'LEAD',
+    resourceId: saved.id,
+    resourceLabel: leadLabel(saved),
+    description: `Client restored: ${leadLabel(saved)}`
+  }, { always: true });
+  return saved;
 }
 
 export async function dispatchOcularFromLead(leadId, teamId, rnNo, scheduledDate = '') {
